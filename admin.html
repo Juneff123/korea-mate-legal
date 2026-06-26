@@ -94,11 +94,9 @@ async function doLogin(){
   const email=document.getElementById('email').value.trim();
   const password=document.getElementById('password').value;
   const err=document.getElementById('loginError'); err.textContent='로그인 중...';
-  const {data,error}=await sb.auth.signInWithPassword({email,password});
-  if(error){err.textContent='로그인 실패: '+error.message; return;}
-  const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',data.user.id).single();
-  if(!prof||!prof.is_admin){err.textContent='운영자 권한이 없는 계정입니다.'; await sb.auth.signOut(); return;}
-  enterApp(prof);
+  const {error}=await sb.auth.signInWithPassword({email,password});
+  if(error){err.textContent='로그인 실패: '+error.message;}
+  // 성공 시 아래 onAuthStateChange 핸들러가 권한 확인 후 진입 처리
 }
 function enterApp(prof){
   document.getElementById('loginView').hidden=true;
@@ -227,13 +225,13 @@ document.addEventListener('keydown',e=>{
   if(id==='msgInput') sendMessage();
   else if(id==='email'||id==='password') doLogin();
 });
-(async()=>{
-  const {data:{session}}=await sb.auth.getSession();
-  if(session){
-    const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',session.user.id).single();
-    if(prof&&prof.is_admin) enterApp(prof);
-  }
-})();
+sb.auth.onAuthStateChange(async (event, session)=>{
+  if(!session) return;
+  if(!document.getElementById('appView').hidden) return; // 이미 진입함
+  const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',session.user.id).single();
+  if(prof&&prof.is_admin){ enterApp(prof); }
+  else { document.getElementById('loginError').textContent='운영자 권한이 없는 계정입니다.'; await sb.auth.signOut(); }
+});
 </script>
 </body>
 </html>
