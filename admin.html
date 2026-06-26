@@ -138,7 +138,7 @@ function renderList(){
         <span class="font-medium text-sm">${CATEGORY[r.category]||r.category}</span>
         <span class="text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}">${st.label}</span>
       </div>
-      <div class="text-sm text-gray-700 mt-1">${esc(r.place_name)||'<span class=\\'text-gray-400\\'>(장소 미정)</span>'}</div>
+      <div class="text-sm text-gray-700 mt-1">${r.place_name?esc(r.place_name):'<span class="text-gray-400">(장소 미정)</span>'}</div>
       <div class="text-xs text-gray-400 mt-1">${esc(p.name)||'?'} · ${r.preferred_date||'날짜미정'} · ${r.party_size||1}명</div>
     </button>`;
   }).join('');
