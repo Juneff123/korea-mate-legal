@@ -16,7 +16,6 @@
 </head>
 <body class="bg-gray-50">
 
-<!-- 로그인 -->
 <div id="loginView" class="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 to-white px-4">
   <div class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-8">
     <div class="text-center mb-6">
@@ -31,7 +30,6 @@
   </div>
 </div>
 
-<!-- 앱 -->
 <div id="appView" hidden class="h-screen flex flex-col">
   <header class="bg-white border-b px-4 py-3 flex items-center justify-between shrink-0">
     <div class="flex items-center gap-2.5">
@@ -71,13 +69,13 @@
 </div>
 
 <script>
-const SUPABASE_URL = 'https://kkidevtusexyztrkccck.supabase.co';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtraWRldnR1c2V4eXp0cmtjY2NrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NzA5NDUsImV4cCI6MjA5NzI0Njk0NX0.v-PILlC3F2Y1M8b_gJFvsU2SImvv8bQdfJTBayzdFN0';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+const SUPABASE_URL='https://kkidevtusexyztrkccck.supabase.co';
+const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtraWRldnR1c2V4eXp0cmtjY2NrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NzA5NDUsImV4cCI6MjA5NzI0Njk0NX0.v-PILlC3F2Y1M8b_gJFvsU2SImvv8bQdfJTBayzdFN0';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON);
+let currentFilter='all',currentRequest=null,requests=[],profileMap={};
+let entered=false, rtDone=false;
 
-let currentFilter='all', currentRequest=null, requests=[], profileMap={};
-
-const STATUS = {
+const STATUS={
   submitted:{label:'접수됨',color:'bg-slate-100 text-slate-700'},
   reviewing:{label:'검토중',color:'bg-blue-100 text-blue-700'},
   coordinating:{label:'조율중',color:'bg-amber-100 text-amber-800'},
@@ -85,18 +83,24 @@ const STATUS = {
   completed:{label:'완료',color:'bg-emerald-100 text-emerald-800'},
   declined:{label:'취소',color:'bg-red-100 text-red-700'},
 };
-const STATUS_ORDER = ['submitted','reviewing','coordinating','confirmed','completed','declined'];
-const CATEGORY = { restaurant:'🍽️ 식당', beauty:'💇 뷰티', medical:'🏥 의료' };
-
+const STATUS_ORDER=['submitted','reviewing','coordinating','confirmed','completed','declined'];
+const CATEGORY={restaurant:'🍽️ 식당',beauty:'💇 뷰티',medical:'🏥 의료'};
 function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 
 async function doLogin(){
   const email=document.getElementById('email').value.trim();
   const password=document.getElementById('password').value;
   const err=document.getElementById('loginError'); err.textContent='로그인 중...';
-  const {error}=await sb.auth.signInWithPassword({email,password});
-  if(error){err.textContent='로그인 실패: '+error.message;}
-  // 성공 시 아래 onAuthStateChange 핸들러가 권한 확인 후 진입 처리
+  const {data,error}=await sb.auth.signInWithPassword({email,password});
+  if(error){ err.textContent='로그인 실패: '+error.message; return; }
+  err.textContent='';
+  await tryEnter(data.session);
+}
+async function tryEnter(session){
+  if(entered||!session) return;
+  const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',session.user.id).single();
+  if(prof&&prof.is_admin){ entered=true; enterApp(prof); }
+  else { document.getElementById('loginError').textContent='운영자 권한이 없는 계정입니다.'; await sb.auth.signOut(); }
 }
 function enterApp(prof){
   document.getElementById('loginView').hidden=true;
@@ -115,14 +119,13 @@ async function loadRequests(){
     const {data:profs}=await sb.from('profiles').select('id,name,email,preferred_language').in('id',ids);
     profileMap=Object.fromEntries((profs||[]).map(p=>[p.id,p]));
   }
-  renderList(); renderCounts();
   if(currentRequest){ currentRequest=requests.find(r=>r.id===currentRequest.id)||currentRequest; }
+  renderList(); renderCounts();
 }
 function renderCounts(){
   const n=requests.filter(r=>r.status==='submitted').length;
-  const badge=document.getElementById('newBadge');
   document.getElementById('countNew').textContent=n;
-  badge.hidden = n===0;
+  document.getElementById('newBadge').hidden = n===0;
 }
 function renderList(){
   const list=document.getElementById('requestList');
@@ -133,14 +136,13 @@ function renderList(){
   if(!items.length){ list.innerHTML='<p class="p-6 text-center text-gray-400 text-sm">신청이 없습니다</p>'; return; }
   list.innerHTML=items.map(r=>{
     const p=profileMap[r.user_id]||{}; const st=STATUS[r.status]||STATUS.submitted;
-    return `<button onclick="selectRequest('${r.id}')" class="w-full text-left p-4 border-b hover:bg-gray-50 ${currentRequest&&currentRequest.id===r.id?'bg-orange-50':''}">
-      <div class="flex justify-between items-start gap-2">
-        <span class="font-medium text-sm">${CATEGORY[r.category]||r.category}</span>
-        <span class="text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}">${st.label}</span>
-      </div>
-      <div class="text-sm text-gray-700 mt-1">${r.place_name?esc(r.place_name):'<span class="text-gray-400">(장소 미정)</span>'}</div>
-      <div class="text-xs text-gray-400 mt-1">${esc(p.name)||'?'} · ${r.preferred_date||'날짜미정'} · ${r.party_size||1}명</div>
-    </button>`;
+    const place = r.place_name ? esc(r.place_name) : '<span class="text-gray-400">(장소 미정)</span>';
+    return '<button onclick="selectRequest(\''+r.id+'\')" class="w-full text-left p-4 border-b hover:bg-gray-50 '+(currentRequest&&currentRequest.id===r.id?'bg-orange-50':'')+'">'
+      +'<div class="flex justify-between items-start gap-2"><span class="font-medium text-sm">'+(CATEGORY[r.category]||r.category)+'</span>'
+      +'<span class="text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap '+st.color+'">'+st.label+'</span></div>'
+      +'<div class="text-sm text-gray-700 mt-1">'+place+'</div>'
+      +'<div class="text-xs text-gray-400 mt-1">'+(esc(p.name)||'?')+' · '+(r.preferred_date||'날짜미정')+' · '+(r.party_size||1)+'명</div>'
+      +'</button>';
   }).join('');
 }
 function setFilter(f){
@@ -155,27 +157,18 @@ async function selectRequest(id){
 }
 function renderDetail(){
   const r=currentRequest, p=profileMap[r.user_id]||{}, st=STATUS[r.status]||STATUS.submitted;
-  document.getElementById('detail').innerHTML=`
-    <div class="p-5">
-      <div class="flex justify-between items-center mb-3">
-        <h2 class="text-lg font-bold">${CATEGORY[r.category]||r.category}</h2>
-        <span class="text-xs px-3 py-1 rounded-full ${st.color}">${st.label}</span>
-      </div>
-      <dl class="text-sm space-y-1.5">
-        <div><span class="text-gray-400 inline-block w-20">신청자</span> ${esc(p.name)||'?'} <span class="text-gray-400">(${esc(p.email)||'-'})</span> ${p.preferred_language?'· '+esc(p.preferred_language):''}</div>
-        <div><span class="text-gray-400 inline-block w-20">장소</span> ${esc(r.place_name)||'-'} ${r.place_link?`· <a href="${esc(r.place_link)}" target="_blank" class="text-blue-600 underline">링크</a>`:''}</div>
-        <div><span class="text-gray-400 inline-block w-20">희망일시</span> ${r.preferred_date||'-'} ${esc(r.preferred_time)||''}</div>
-        <div><span class="text-gray-400 inline-block w-20">인원</span> ${r.party_size||1}명</div>
-        ${r.notes?`<div><span class="text-gray-400 inline-block w-20 align-top">요청사항</span> <span class="inline-block" style="max-width:80%">${esc(r.notes)}</span></div>`:''}
-        ${r.consultation?`<div><span class="text-gray-400 inline-block w-20 align-top">사전상담</span> <span class="inline-block" style="max-width:80%">${esc(r.consultation)}</span></div>`:''}
-      </dl>
-      <div class="mt-4">
-        <div class="text-xs text-gray-400 mb-1.5">상태 변경 (클릭)</div>
-        <div class="flex flex-wrap gap-1.5">
-          ${STATUS_ORDER.map(s=>`<button onclick="changeStatus('${r.id}','${s}')" class="text-xs px-2.5 py-1 rounded-full border transition ${r.status===s?STATUS[s].color+' border-transparent font-semibold':'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}">${STATUS[s].label}</button>`).join('')}
-        </div>
-      </div>
-    </div>`;
+  const statusBtns=STATUS_ORDER.map(s=>'<button onclick="changeStatus(\''+r.id+'\',\''+s+'\')" class="text-xs px-2.5 py-1 rounded-full border transition '+(r.status===s?STATUS[s].color+' border-transparent font-semibold':'bg-white text-gray-500 border-gray-200 hover:bg-gray-50')+'">'+STATUS[s].label+'</button>').join('');
+  document.getElementById('detail').innerHTML=
+    '<div class="p-5"><div class="flex justify-between items-center mb-3"><h2 class="text-lg font-bold">'+(CATEGORY[r.category]||r.category)+'</h2>'
+    +'<span class="text-xs px-3 py-1 rounded-full '+st.color+'">'+st.label+'</span></div>'
+    +'<dl class="text-sm space-y-1.5">'
+    +'<div><span class="text-gray-400 inline-block w-20">신청자</span> '+(esc(p.name)||'?')+' <span class="text-gray-400">('+(esc(p.email)||'-')+')</span> '+(p.preferred_language?'· '+esc(p.preferred_language):'')+'</div>'
+    +'<div><span class="text-gray-400 inline-block w-20">장소</span> '+(esc(r.place_name)||'-')+' '+(r.place_link?'· <a href="'+esc(r.place_link)+'" target="_blank" class="text-blue-600 underline">링크</a>':'')+'</div>'
+    +'<div><span class="text-gray-400 inline-block w-20">희망일시</span> '+(r.preferred_date||'-')+' '+(esc(r.preferred_time)||'')+'</div>'
+    +'<div><span class="text-gray-400 inline-block w-20">인원</span> '+(r.party_size||1)+'명</div>'
+    +(r.notes?'<div><span class="text-gray-400 inline-block w-20 align-top">요청사항</span> <span style="max-width:80%" class="inline-block">'+esc(r.notes)+'</span></div>':'')
+    +(r.consultation?'<div><span class="text-gray-400 inline-block w-20 align-top">사전상담</span> <span style="max-width:80%" class="inline-block">'+esc(r.consultation)+'</span></div>':'')
+    +'</dl><div class="mt-4"><div class="text-xs text-gray-400 mb-1.5">상태 변경 (클릭)</div><div class="flex flex-wrap gap-1.5">'+statusBtns+'</div></div></div>';
   document.getElementById('detailEmpty').hidden=true;
   document.getElementById('detail').hidden=false;
   document.getElementById('chatBox').hidden=false;
@@ -190,17 +183,9 @@ async function changeStatus(id,status){
 async function loadMessages(userId){
   const {data,error}=await sb.from('messages').select('*').eq('user_id',userId).order('created_at',{ascending:true});
   if(error){console.error(error); return;}
-  renderMessages(data||[]);
-}
-function renderMessages(msgs){
   const box=document.getElementById('messages');
-  if(!msgs.length){ box.innerHTML='<p class="text-center text-gray-300 text-sm mt-8">아직 대화가 없습니다</p>'; return; }
-  box.innerHTML=msgs.map(m=>{
-    const mine=m.from_admin;
-    return `<div class="flex ${mine?'justify-end':'justify-start'} mb-2">
-      <div class="max-w-[75%] px-3 py-2 rounded-2xl text-sm ${mine?'bg-orange-500 text-white':'bg-white border text-gray-800'}">${esc(m.content)}</div>
-    </div>`;
-  }).join('');
+  if(!data||!data.length){ box.innerHTML='<p class="text-center text-gray-300 text-sm mt-8">아직 대화가 없습니다</p>'; return; }
+  box.innerHTML=data.map(m=>'<div class="flex '+(m.from_admin?'justify-end':'justify-start')+' mb-2"><div class="max-w-[75%] px-3 py-2 rounded-2xl text-sm '+(m.from_admin?'bg-orange-500 text-white':'bg-white border text-gray-800')+'">'+esc(m.content)+'</div></div>').join('');
   box.scrollTop=box.scrollHeight;
 }
 async function sendMessage(){
@@ -213,6 +198,7 @@ async function sendMessage(){
   input.value=''; loadMessages(currentRequest.user_id);
 }
 function subscribeRealtime(){
+  if(rtDone) return; rtDone=true;
   sb.channel('admin-rt')
     .on('postgres_changes',{event:'*',schema:'public',table:'reservation_requests'},()=>loadRequests())
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},(payload)=>{
@@ -225,13 +211,8 @@ document.addEventListener('keydown',e=>{
   if(id==='msgInput') sendMessage();
   else if(id==='email'||id==='password') doLogin();
 });
-sb.auth.onAuthStateChange(async (event, session)=>{
-  if(!session) return;
-  if(!document.getElementById('appView').hidden) return; // 이미 진입함
-  const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',session.user.id).single();
-  if(prof&&prof.is_admin){ enterApp(prof); }
-  else { document.getElementById('loginError').textContent='운영자 권한이 없는 계정입니다.'; await sb.auth.signOut(); }
-});
+sb.auth.onAuthStateChange((event,session)=>{ if(session) tryEnter(session); });
+(async()=>{ const {data:{session}}=await sb.auth.getSession(); if(session) tryEnter(session); })();
 </script>
 </body>
 </html>
