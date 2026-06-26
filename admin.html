@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Korea Mate 운영자 콘솔</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", sans-serif; }
+  .active-tab { color:#E85D4E; border-bottom:2px solid #E85D4E; font-weight:600; }
+  .filterTab { color:#999; border-bottom:2px solid transparent; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#ddd; border-radius:4px; }
+</style>
+</head>
+<body class="bg-gray-50">
+
+<!-- 로그인 -->
+<div id="loginView" class="min-h-screen flex items-center justify-center bg-gradient-to-b from-orange-50 to-white px-4">
+  <div class="w-full max-w-sm bg-white rounded-2xl shadow-lg p-8">
+    <div class="text-center mb-6">
+      <div class="w-14 h-14 bg-orange-500 rounded-2xl mx-auto mb-3 flex items-center justify-center text-2xl">🛎️</div>
+      <h1 class="text-xl font-bold">Korea Mate 운영자</h1>
+      <p class="text-sm text-gray-500 mt-1">예약 신청 관리 콘솔</p>
+    </div>
+    <input id="email" type="email" placeholder="운영자 이메일" autocomplete="username" class="w-full border rounded-lg px-3 py-2.5 mb-2.5 text-sm focus:outline-none focus:border-orange-400">
+    <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" class="w-full border rounded-lg px-3 py-2.5 mb-3 text-sm focus:outline-none focus:border-orange-400">
+    <button onclick="doLogin()" class="w-full bg-orange-500 text-white rounded-lg py-2.5 font-medium hover:bg-orange-600 transition">로그인</button>
+    <p id="loginError" class="text-red-500 text-sm mt-3 text-center"></p>
+  </div>
+</div>
+
+<!-- 앱 -->
+<div id="appView" hidden class="h-screen flex flex-col">
+  <header class="bg-white border-b px-4 py-3 flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center text-base">🛎️</div>
+      <span class="font-bold">Korea Mate 운영자</span>
+      <span id="newBadge" hidden class="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full">신규 <span id="countNew">0</span></span>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+      <button onclick="loadRequests()" class="text-gray-400 hover:text-orange-500" title="새로고침">↻</button>
+      <span id="adminName" class="text-gray-600"></span>
+      <button onclick="logout()" class="text-gray-400 hover:text-gray-700">로그아웃</button>
+    </div>
+  </header>
+  <div class="flex flex-1 overflow-hidden">
+    <aside class="w-80 border-r flex flex-col bg-white shrink-0">
+      <div class="flex border-b text-sm shrink-0">
+        <button id="tab-all" onclick="setFilter('all')" class="filterTab active-tab flex-1 py-2.5">전체</button>
+        <button id="tab-new" onclick="setFilter('new')" class="filterTab flex-1 py-2.5">신규</button>
+        <button id="tab-active" onclick="setFilter('active')" class="filterTab flex-1 py-2.5">진행</button>
+        <button id="tab-done" onclick="setFilter('done')" class="filterTab flex-1 py-2.5">완료</button>
+      </div>
+      <div id="requestList" class="flex-1 overflow-y-auto"></div>
+    </aside>
+    <main class="flex-1 flex flex-col overflow-hidden bg-gray-50">
+      <div id="detailEmpty" class="flex-1 flex items-center justify-center text-gray-400 text-sm">← 왼쪽에서 신청을 선택하세요</div>
+      <div id="detail" hidden class="bg-white shrink-0 overflow-y-auto" style="max-height:55%"></div>
+      <div id="chatBox" hidden class="flex-1 flex flex-col overflow-hidden border-t bg-white">
+        <div class="px-4 py-2 border-b text-xs text-gray-400 shrink-0">💬 신청자와의 채팅</div>
+        <div id="messages" class="flex-1 overflow-y-auto p-4 bg-gray-50"></div>
+        <div class="border-t p-3 flex gap-2 bg-white shrink-0">
+          <input id="msgInput" placeholder="메시지 입력 후 Enter" class="flex-1 border rounded-full px-4 py-2 text-sm focus:outline-none focus:border-orange-400">
+          <button onclick="sendMessage()" class="bg-orange-500 text-white rounded-full px-5 py-2 text-sm font-medium hover:bg-orange-600">전송</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://kkidevtusexyztrkccck.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtraWRldnR1c2V4eXp0cmtjY2NrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE2NzA5NDUsImV4cCI6MjA5NzI0Njk0NX0.v-PILlC3F2Y1M8b_gJFvsU2SImvv8bQdfJTBayzdFN0';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+
+let currentFilter='all', currentRequest=null, requests=[], profileMap={};
+
+const STATUS = {
+  submitted:{label:'접수됨',color:'bg-slate-100 text-slate-700'},
+  reviewing:{label:'검토중',color:'bg-blue-100 text-blue-700'},
+  coordinating:{label:'조율중',color:'bg-amber-100 text-amber-800'},
+  confirmed:{label:'확정',color:'bg-green-100 text-green-700'},
+  completed:{label:'완료',color:'bg-emerald-100 text-emerald-800'},
+  declined:{label:'취소',color:'bg-red-100 text-red-700'},
+};
+const STATUS_ORDER = ['submitted','reviewing','coordinating','confirmed','completed','declined'];
+const CATEGORY = { restaurant:'🍽️ 식당', beauty:'💇 뷰티', medical:'🏥 의료' };
+
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+async function doLogin(){
+  const email=document.getElementById('email').value.trim();
+  const password=document.getElementById('password').value;
+  const err=document.getElementById('loginError'); err.textContent='로그인 중...';
+  const {data,error}=await sb.auth.signInWithPassword({email,password});
+  if(error){err.textContent='로그인 실패: '+error.message; return;}
+  const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',data.user.id).single();
+  if(!prof||!prof.is_admin){err.textContent='운영자 권한이 없는 계정입니다.'; await sb.auth.signOut(); return;}
+  enterApp(prof);
+}
+function enterApp(prof){
+  document.getElementById('loginView').hidden=true;
+  document.getElementById('appView').hidden=false;
+  document.getElementById('adminName').textContent=(prof.name||'운영자')+' 님';
+  loadRequests(); subscribeRealtime();
+}
+async function logout(){ await sb.auth.signOut(); location.reload(); }
+
+async function loadRequests(){
+  const {data:reqs,error}=await sb.from('reservation_requests').select('*').order('created_at',{ascending:false});
+  if(error){console.error(error); return;}
+  requests=reqs||[];
+  const ids=[...new Set(requests.map(r=>r.user_id))];
+  if(ids.length){
+    const {data:profs}=await sb.from('profiles').select('id,name,email,preferred_language').in('id',ids);
+    profileMap=Object.fromEntries((profs||[]).map(p=>[p.id,p]));
+  }
+  renderList(); renderCounts();
+  if(currentRequest){ currentRequest=requests.find(r=>r.id===currentRequest.id)||currentRequest; }
+}
+function renderCounts(){
+  const n=requests.filter(r=>r.status==='submitted').length;
+  const badge=document.getElementById('newBadge');
+  document.getElementById('countNew').textContent=n;
+  badge.hidden = n===0;
+}
+function renderList(){
+  const list=document.getElementById('requestList');
+  let items=requests;
+  if(currentFilter==='new') items=requests.filter(r=>r.status==='submitted');
+  else if(currentFilter==='active') items=requests.filter(r=>['reviewing','coordinating','confirmed'].includes(r.status));
+  else if(currentFilter==='done') items=requests.filter(r=>['completed','declined'].includes(r.status));
+  if(!items.length){ list.innerHTML='<p class="p-6 text-center text-gray-400 text-sm">신청이 없습니다</p>'; return; }
+  list.innerHTML=items.map(r=>{
+    const p=profileMap[r.user_id]||{}; const st=STATUS[r.status]||STATUS.submitted;
+    return `<button onclick="selectRequest('${r.id}')" class="w-full text-left p-4 border-b hover:bg-gray-50 ${currentRequest&&currentRequest.id===r.id?'bg-orange-50':''}">
+      <div class="flex justify-between items-start gap-2">
+        <span class="font-medium text-sm">${CATEGORY[r.category]||r.category}</span>
+        <span class="text-[11px] px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}">${st.label}</span>
+      </div>
+      <div class="text-sm text-gray-700 mt-1">${esc(r.place_name)||'<span class=\\'text-gray-400\\'>(장소 미정)</span>'}</div>
+      <div class="text-xs text-gray-400 mt-1">${esc(p.name)||'?'} · ${r.preferred_date||'날짜미정'} · ${r.party_size||1}명</div>
+    </button>`;
+  }).join('');
+}
+function setFilter(f){
+  currentFilter=f;
+  document.querySelectorAll('.filterTab').forEach(t=>t.classList.remove('active-tab'));
+  document.getElementById('tab-'+f).classList.add('active-tab');
+  renderList();
+}
+async function selectRequest(id){
+  currentRequest=requests.find(r=>r.id===id);
+  renderList(); renderDetail(); loadMessages(currentRequest.user_id);
+}
+function renderDetail(){
+  const r=currentRequest, p=profileMap[r.user_id]||{}, st=STATUS[r.status]||STATUS.submitted;
+  document.getElementById('detail').innerHTML=`
+    <div class="p-5">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="text-lg font-bold">${CATEGORY[r.category]||r.category}</h2>
+        <span class="text-xs px-3 py-1 rounded-full ${st.color}">${st.label}</span>
+      </div>
+      <dl class="text-sm space-y-1.5">
+        <div><span class="text-gray-400 inline-block w-20">신청자</span> ${esc(p.name)||'?'} <span class="text-gray-400">(${esc(p.email)||'-'})</span> ${p.preferred_language?'· '+esc(p.preferred_language):''}</div>
+        <div><span class="text-gray-400 inline-block w-20">장소</span> ${esc(r.place_name)||'-'} ${r.place_link?`· <a href="${esc(r.place_link)}" target="_blank" class="text-blue-600 underline">링크</a>`:''}</div>
+        <div><span class="text-gray-400 inline-block w-20">희망일시</span> ${r.preferred_date||'-'} ${esc(r.preferred_time)||''}</div>
+        <div><span class="text-gray-400 inline-block w-20">인원</span> ${r.party_size||1}명</div>
+        ${r.notes?`<div><span class="text-gray-400 inline-block w-20 align-top">요청사항</span> <span class="inline-block" style="max-width:80%">${esc(r.notes)}</span></div>`:''}
+        ${r.consultation?`<div><span class="text-gray-400 inline-block w-20 align-top">사전상담</span> <span class="inline-block" style="max-width:80%">${esc(r.consultation)}</span></div>`:''}
+      </dl>
+      <div class="mt-4">
+        <div class="text-xs text-gray-400 mb-1.5">상태 변경 (클릭)</div>
+        <div class="flex flex-wrap gap-1.5">
+          ${STATUS_ORDER.map(s=>`<button onclick="changeStatus('${r.id}','${s}')" class="text-xs px-2.5 py-1 rounded-full border transition ${r.status===s?STATUS[s].color+' border-transparent font-semibold':'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}">${STATUS[s].label}</button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('detailEmpty').hidden=true;
+  document.getElementById('detail').hidden=false;
+  document.getElementById('chatBox').hidden=false;
+}
+async function changeStatus(id,status){
+  const {error}=await sb.from('reservation_requests').update({status,updated_at:new Date().toISOString()}).eq('id',id);
+  if(error){alert('변경 실패: '+error.message); return;}
+  const r=requests.find(x=>x.id===id); if(r) r.status=status;
+  if(currentRequest&&currentRequest.id===id) currentRequest.status=status;
+  renderList(); renderDetail(); renderCounts();
+}
+async function loadMessages(userId){
+  const {data,error}=await sb.from('messages').select('*').eq('user_id',userId).order('created_at',{ascending:true});
+  if(error){console.error(error); return;}
+  renderMessages(data||[]);
+}
+function renderMessages(msgs){
+  const box=document.getElementById('messages');
+  if(!msgs.length){ box.innerHTML='<p class="text-center text-gray-300 text-sm mt-8">아직 대화가 없습니다</p>'; return; }
+  box.innerHTML=msgs.map(m=>{
+    const mine=m.from_admin;
+    return `<div class="flex ${mine?'justify-end':'justify-start'} mb-2">
+      <div class="max-w-[75%] px-3 py-2 rounded-2xl text-sm ${mine?'bg-orange-500 text-white':'bg-white border text-gray-800'}">${esc(m.content)}</div>
+    </div>`;
+  }).join('');
+  box.scrollTop=box.scrollHeight;
+}
+async function sendMessage(){
+  const input=document.getElementById('msgInput');
+  const content=input.value.trim();
+  if(!content||!currentRequest) return;
+  const {data:{user}}=await sb.auth.getUser();
+  const {error}=await sb.from('messages').insert({user_id:currentRequest.user_id,sender_id:user.id,from_admin:true,request_id:currentRequest.id,content});
+  if(error){alert('전송 실패: '+error.message); return;}
+  input.value=''; loadMessages(currentRequest.user_id);
+}
+function subscribeRealtime(){
+  sb.channel('admin-rt')
+    .on('postgres_changes',{event:'*',schema:'public',table:'reservation_requests'},()=>loadRequests())
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},(payload)=>{
+      if(currentRequest&&payload.new.user_id===currentRequest.user_id) loadMessages(currentRequest.user_id);
+    }).subscribe();
+}
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const id=document.activeElement&&document.activeElement.id;
+  if(id==='msgInput') sendMessage();
+  else if(id==='email'||id==='password') doLogin();
+});
+(async()=>{
+  const {data:{session}}=await sb.auth.getSession();
+  if(session){
+    const {data:prof}=await sb.from('profiles').select('is_admin,name').eq('id',session.user.id).single();
+    if(prof&&prof.is_admin) enterApp(prof);
+  }
+})();
+</script>
+</body>
+</html>
