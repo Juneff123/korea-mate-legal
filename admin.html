@@ -107,6 +107,7 @@ function enterApp(prof){
   document.getElementById('loginView').hidden=true;
   document.getElementById('appView').hidden=false;
   document.getElementById('adminName').textContent=(prof.name||'운영자')+' 님';
+  if('Notification' in window && Notification.permission==='default'){ try{Notification.requestPermission();}catch(e){} }
   loadRequests(); subscribeRealtime();
 }
 async function logout(){ await sb.auth.signOut(); location.reload(); }
@@ -198,11 +199,22 @@ async function sendMessage(){
   if(error){alert('전송 실패: '+error.message); return;}
   input.value=''; loadMessages(currentRequest.user_id);
 }
+function beep(){
+  try{const a=new (window.AudioContext||window.webkitAudioContext)();const o=a.createOscillator(),g=a.createGain();o.connect(g);g.connect(a.destination);o.type='sine';o.frequency.value=880;g.gain.setValueAtTime(0.25,a.currentTime);o.start();o.stop(a.currentTime+0.18);}catch(e){}
+}
+function notify(title,body){
+  beep();
+  try{ if('Notification' in window && Notification.permission==='granted') new Notification(title,{body}); }catch(e){}
+}
 function subscribeRealtime(){
   if(rtDone) return; rtDone=true;
   sb.channel('admin-rt')
-    .on('postgres_changes',{event:'*',schema:'public',table:'reservation_requests'},()=>loadRequests())
+    .on('postgres_changes',{event:'INSERT',schema:'public',table:'reservation_requests'},(payload)=>{
+      const r=payload.new; notify('🛎️ 새 예약 요청',(CATEGORY[r.category]||r.category)+' · '+(r.place_name||'장소 미정')); loadRequests();
+    })
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'reservation_requests'},()=>loadRequests())
     .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},(payload)=>{
+      if(!payload.new.from_admin) notify('💬 새 문의',payload.new.content);
       if(currentRequest&&payload.new.user_id===currentRequest.user_id) loadMessages(currentRequest.user_id);
     }).subscribe();
 }
